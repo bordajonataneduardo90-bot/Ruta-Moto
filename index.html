@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Ruta Moto</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f3f4f6;color:#111827}
+header{background:#111827;color:#fff;padding:18px 16px;position:sticky;top:0;z-index:3}
+h1{margin:0;font-size:25px}header p{margin:4px 0 0;opacity:.75;font-size:13px}
+main{max-width:720px;margin:auto;padding:14px}
+.card{background:#fff;border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 2px 10px #0000000d}
+label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+input{width:100%;padding:13px;border:1px solid #d1d5db;border-radius:11px;font-size:16px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button{border:0;border-radius:11px;padding:13px 15px;font-size:15px;font-weight:750;cursor:pointer}
+.primary{background:#111827;color:#fff}.green{background:#166534;color:#fff}.light{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}
+.small{font-size:12px;color:#6b7280}.empty{text-align:center;color:#6b7280;padding:20px}
+.delivery{display:flex;gap:10px;align-items:center;border:1px solid #e5e7eb;border-radius:12px;padding:11px;margin-top:8px}
+.num{min-width:32px;height:32px;border-radius:50%;background:#111827;color:#fff;display:grid;place-items:center;font-weight:800}
+.addr{flex:1;font-size:14px}.done{opacity:.55;text-decoration:line-through}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.actions button{flex:1;min-width:130px}
+#status{margin-top:8px;font-size:13px;color:#374151}.badge{display:inline-block;background:#e5e7eb;padding:4px 8px;border-radius:99px;font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>🏍️ Ruta Moto</h1><p>Organizá tus entregas y navegá a la próxima</p></header>
+<main>
+<section class="card">
+<label>Dirección de entrega</label>
+<input id="address" placeholder="Ej.: Av. 3 de Abril 1200, Corrientes" autocomplete="street-address">
+<div class="actions"><button class="primary" onclick="addDelivery()">➕ Agregar entrega</button><button class="light" onclick="useLocation()">📍 Mi ubicación</button></div>
+<div id="status"></div>
+</section>
+
+<section class="card">
+<div class="row"><div><b>Mis entregas</b></div><div style="text-align:right"><span class="badge" id="count">0</span></div></div>
+<div id="list"><div class="empty">Todavía no agregaste entregas.</div></div>
+<div class="actions">
+<button class="green" onclick="optimize()">🧠 Ordenar ruta</button>
+<button class="light" onclick="clearAll()">🗑️ Borrar todo</button>
+</div>
+</section>
+
+<section class="card">
+<b>Prueba rápida</b>
+<p class="small">Agregá 2 o 3 direcciones. Luego tocá “Ordenar ruta”. La app intentará convertirlas en coordenadas y calcular un recorrido por calles. Para navegar, abrirá Google Maps.</p>
+</section>
+</main>
+<script>
+let deliveries=JSON.parse(localStorage.getItem('rutaMotoDeliveries')||'[]');
+let currentPos=null;
+
+function save(){localStorage.setItem('rutaMotoDeliveries',JSON.stringify(deliveries));render()}
+function setStatus(t){document.getElementById('status').textContent=t}
+function addDelivery(){
+ const el=document.getElementById('address'); const a=el.value.trim();
+ if(!a){setStatus('Escribí una dirección primero.');return}
+ deliveries.push({address:a,done:false,lat:null,lon:null}); el.value=''; save(); setStatus('Entrega agregada.');
+}
+function render(){
+ const list=document.getElementById('list'); document.getElementById('count').textContent=deliveries.length;
+ if(!deliveries.length){list.innerHTML='<div class="empty">Todavía no agregaste entregas.</div>';return}
+ list.innerHTML=deliveries.map((d,i)=>`<div class="delivery">
+ <div class="num">${i+1}</div><div class="addr ${d.done?'done':''}">${escapeHtml(d.address)}${d.lat?`<div class="small">📍 ${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}</div>`:''}</div>
+ <button class="light" onclick="toggleDone(${i})">${d.done?'↩️':'✅'}</button>
+ <button class="danger" onclick="removeDelivery(${i})">✕</button></div>`).join('');
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function toggleDone(i){deliveries[i].done=!deliveries[i].done;save()}
+function removeDelivery(i){deliveries.splice(i,1);save()}
+function clearAll(){if(confirm('¿Borrar todas las entregas?')){deliveries=[];save();setStatus('Lista vacía.')}}
+function useLocation(){
+ if(!navigator.geolocation){setStatus('Tu navegador no permite ubicación.');return}
+ setStatus('Obteniendo ubicación…');
+ navigator.geolocation.getCurrentPosition(p=>{currentPos=[p.coords.latitude,p.coords.longitude];setStatus('Ubicación obtenida.');},e=>setStatus('No se pudo obtener la ubicación. Revisá el permiso de ubicación de Chrome.'),{enableHighAccuracy:true,timeout:10000});
+}
+async function geocode(address){
+ const q=encodeURIComponent(address);
+ const r=await fetch(`https://photon.komoot.io/api/?q=${q}&limit=1`);
+ if(!r.ok) throw new Error('geocode');
+ const j=await r.json(); if(!j.features?.length) return null;
+ const c=j.features[0].geometry.coordinates;
+ return {lon:c[0],lat:c[1]};
+}
+async function optimize(){
+ if(deliveries.length<2){setStatus('Agregá al menos 2 entregas.');return}
+ setStatus('Buscando las direcciones…');
+ try{
+  for(const d of deliveries){
+   if(!d.lat){const p=await geocode(d.address); if(!p) throw new Error('No encontré: '+d.address); d.lat=p.lat;d.lon=p.lon}
+  }
+  const coords=deliveries.map(d=>`${d.lon},${d.lat}`).join(';');
+  let url=`https://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last&overview=false`;
+  if(currentPos) {
+   const all=[`${currentPos[1]},${currentPos[0]}`,...deliveries.map(d=>`${d.lon},${d.lat}`)].join(';');
+   url=`https://router.project-osrm.org/trip/v1/driving/${all}?roundtrip=false&source=first&destination=last&overview=false`;
+  }
+  const r=await fetch(url); if(!r.ok) throw new Error('route');
+  const j=await r.json();
+  if(j.code!=='Ok') throw new Error('route');
+  const order=j.waypoints.map(w=>w.waypoint_index).slice(1);
+  const old=[...deliveries]; deliveries=order.map(i=>old[i]);
+  save(); setStatus('Ruta ordenada. Tocá “Navegar” en la primera entrega pendiente.');
+ }catch(e){console.error(e);setStatus('No pude calcular la ruta automáticamente. Probá direcciones más completas (calle + número + ciudad).')}
+}
+function nextNavigation(){
+ const d=deliveries.find(x=>!x.done); if(!d){setStatus('No quedan entregas pendientes.');return}
+ location.href='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent(d.address)+'&travelmode=driving';
+}
+render();
+const nav=document.createElement('div');nav.className='card';nav.innerHTML='<button class="primary" style="width:100%" onclick="nextNavigation()">🧭 NAVEGAR A LA PRÓXIMA</button>';document.querySelector('main').appendChild(nav);
+</script>
+</body>
+</html>
